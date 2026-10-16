@@ -113,6 +113,8 @@ def main():
 
     if tree["sha"] == base_tree:
         print("  ✓ 内容与远端完全一致，无需提交")
+        with open("/tmp/gh_api_sha", "w") as f:
+            f.write(parent)
         return 0
 
     st, commit = call("POST", "/repos/%s/git/commits" % repo, token,
@@ -122,6 +124,8 @@ def main():
          {"sha": commit["sha"], "force": False})
 
     print("  ✓ 提交完成 %s" % commit["sha"][:12])
+    with open("/tmp/gh_api_sha", "w") as f:
+        f.write(commit["sha"])
     return 0
 
 
