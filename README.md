@@ -20,6 +20,9 @@
 | `test_pwa.js` | 联网自测（Node 直连真实接口，42 项断言） |
 | `test_offline.js` | 离线自测（模拟 file:// + 存储被禁 + 无网络，42 项断言） |
 | `start.sh` | 可选：在安卓上起 HTTP 服务（仅当你想让 iPhone 走局域网自动更新时用） |
+| `publish_gh.sh` | 一键发布：同步工具链 → `git push`（失败自动改走 API）→ 检查 Pages → 验证线上 |
+| `gh_api_publish.py` | 纯标准库 API 提交器：**只依赖 `api.github.com`**，`github.com:443` 被阻断时仍能上线 |
+| `set_token.sh` | 从任意文本里提取 token → 写入 `~/.gh_token`（600）→ 校验账号与推送权限 → 删除明文来源 |
 
 ---
 
@@ -127,5 +130,34 @@ node /sdcard/Download/solab/XinAomen/ios/test_offline.js   # 离线：42 通过 
 - 图片：`amo.jlidesign.com:4949/col/<期号>/zbptyxx.jpg`
 
 > 三家数据源实测均放行跨域（`access-control-allow-origin` 回显 Origin，含 `null`），纯前端直连，零后端。
+
+---
+
+## 九、发布（GitHub Pages）与长期凭据
+
+线上地址：**https://279296927.github.io/xinaomen-ios/**
+
+**一键发布**（改完 `index.html` 后执行）：
+
+```bash
+bash /sdcard/Download/solab/XinAomen/ios/publish_gh.sh xinaomen-ios
+```
+
+它依次做 6 步：① 校验 `index.html`；② 用 API 确认仓库/权限；③ 把工具链脚本同步进发布工作目录；④ 提交并推送——**推送前先 `fetch` 对齐远端历史**，`github.com` 8 秒探测不可达时**直接跳过 3 次重试**（省约 95 秒），3 次仍失败则**自动改走 `gh_api_publish.py`**（只走 `api.github.com`）；⑤ 确认 Pages 已开启；⑥ 拉线上首页与本地逐字节比对。
+
+### 凭据：建议换成你自签的长期 token
+
+脚本从 `~/.gh_token` 读取凭据，两种放法都支持：
+
+| 方式 | 做法 |
+|---|---|
+| A. 一次装好（推荐） | 把 token 文本粘进 `/sdcard/Download/solab/tok.txt`，执行 `bash /sdcard/Download/solab/XinAomen/ios/set_token.sh`。它会提取 token → 写 `~/.gh_token`(600) → 打印账号与 scope → **删掉 tok.txt** |
+| B. 手动 | 直接 `printf 'export GITHUB_TOKEN=ghp_xxx\n' > ~/.gh_token && chmod 600 ~/.gh_token` |
+
+生成长期 token 的步骤见对话中的说明（GitHub → Settings → Developer settings → Personal access tokens → **Tokens (classic)** → Generate new token，勾 `repo`，有效期按需，生成后复制 `ghp_...`）。
+
+> ⚠️ **维护提醒（踩过的坑）**：`index.html` 结尾**没有换行符**（`</html>` 紧接 EOF）。往这个文件尾部追加测试内容时，如果没先补换行，新内容会拼到 `</html>` 那一行上；此时用 `sed -i '/xxx/d'` 按行删除，会**连 `</html>` 一起删掉**。
+> 正确做法：追加前先 `printf '\n' >> index.html`；或改用 `sed -i 's/<!-- ping[^>]*-->//g' index.html` 按**模式**删而不是按行删。
+> 每次发布后请确认：`grep -c '</html>' index.html` 应为 **1**。
 
 仅供娱乐参考。
