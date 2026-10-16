@@ -45,6 +45,21 @@ def call(method, path, token, payload=None, tolerate=()):
         raise RuntimeError("%s %s → HTTP %s\n%s" % (method, path, e.code, body[:400]))
 
 
+def load_token():
+    """优先环境变量，其次 ~/.gh_token（内容形如 export GITHUB_TOKEN=...）。"""
+    tok = os.environ.get("GITHUB_TOKEN", "").strip()
+    if tok:
+        return tok
+    path = os.path.join(os.path.expanduser("~"), ".gh_token")
+    if os.path.isfile(path):
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("export GITHUB_TOKEN="):
+                    return line.split("=", 1)[1].strip().strip("'\"")
+    return ""
+
+
 def collect(root):
     """收集目录下的文件（跳过 .git），返回 {相对路径: bytes}。"""
     out = {}
@@ -63,9 +78,9 @@ def main():
         print("用法: gh_api_publish.py <owner/repo> <目录> <分支> <提交信息>")
         return 2
     repo, root, branch, message = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
-    token = os.environ.get("GITHUB_TOKEN", "")
+    token = load_token()
     if not token:
-        print("✗ 缺少 GITHUB_TOKEN")
+        print("✗ 缺少 GITHUB_TOKEN（可写入 ~/.gh_token，或用 bash set_token.sh 安装）")
         return 1
     if not os.path.isdir(root):
         print("✗ 目录不存在：%s" % root)
