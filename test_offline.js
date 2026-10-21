@@ -134,7 +134,7 @@ ok(sumTail === 60 && Object.keys(tailResp).length === 10, '本地走势尾数 0-
 /* 5. 六页面离线渲染 */
 T.render();
 const sections = [
-  ['home', T.homeHtml, ['最新开奖', '本期推荐', '推荐历史', '冷门号预览', '平码生肖统计', '开奖记录']],
+  ['home', T.homeHtml, ['最新开奖', '本期推荐', '18码中特图', '平码留档', '冷门号预览', '平码生肖统计', '开奖记录']],
   ['cold', T.coldHtml, ['冷门号一览', '冷门 ' + T.COLD_T1, '极冷 ' + T.COLD_T2]],
   ['kill', T.killHtml, ['杀生肖分析', '平码生肖（不含特码）', '特码生肖', '本期杀生肖建议', '生肖遗漏']],
   ['pattern', T.patternHtml, ['冷号规律', '核心结论', '遗漏排行榜']],

@@ -26,6 +26,14 @@ button{font-family:inherit;cursor:pointer;border:0}
 .histhead{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .sechint{font-size:11px;font-weight:400;color:var(--sub);margin-left:6px}
 .hbtn{flex:0 0 auto;border-radius:7px;padding:5px 11px;font-size:11px;color:#fff;line-height:1.2;white-space:nowrap;transition:background .15s}
+/* 推荐两栏（平码 / 特码）：左侧色条分栏 + 来源小标签 */
+.zcol{border-left:3px solid var(--card2);border-radius:6px;padding:1px 0 3px 9px;margin-top:10px}
+.zcolt{font-size:12px;font-weight:700;letter-spacing:2px;margin-bottom:2px}
+.tag{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:6px;background:var(--card2);color:var(--sub);font-size:9px;font-weight:400;vertical-align:middle;letter-spacing:0}
+/* 特码推荐号码图（18码中特图） */
+.zsub{font-size:12px;font-weight:700;color:var(--gold);margin-top:11px;padding-top:9px;border-top:1px solid var(--card2)}
+.picwrap{margin-top:5px}
+.picerr{color:var(--bad);font-size:11px;line-height:1.5;padding:8px 0}
 /* v2.7 爆冷保留：极冷=金 冷=琥珀 */
 .tip{color:var(--sub);font-size:11px;margin-top:3px;line-height:1.45}
 .ln{margin-top:3px;font-size:13px;line-height:1.5}
@@ -97,6 +105,9 @@ var HIST_PREFIX='https://history.macaumarksix.com/history/macaujc2/y/';
 var PRED_API='https://yy33uu.2567kj69.com/api/six-predictions/21';
 var SITE='https://yy33uu.2567kj69.com';
 var PIC_HOST='https://amo.jlidesign.com:4949/col';
+/* 特码推荐号码图：六合论坛「18码中特图」（type=21 澳门，alias=18ma） */
+var PIC18_API=SITE+'/api/six-pictures?lottery_type=21&title='+encodeURIComponent('18码中特图');
+var PIC18_ALIAS='18ma', PIC18_FRESH_MS=600000;
 var TREND_BASE='https://trend.macaumarksix.com';
 var MAX_KEEP=150, COLD_T1=65, COLD_T2=100, WINDOW=25, RECO_KEEP=30;
 var SYNC_MIN_INTERVAL_MS=30000, POLL_MS=60000;
@@ -498,6 +509,16 @@ Store.prototype.zodiacLastIndexSpecial=function(){
     if(z==null)continue;if(m[z]===total)m[z]=j;}
   return m;
 };
+/* 回看区间 0..hi（含）内每个生肖最近一次出现的下标；未出现 = hi+1 */
+Store.prototype.zodiacLastIndexRange=function(hi,special){
+  var m={},lim=Math.min(hi+1,this.draws.length);
+  for(var i=0;i<ZODIAC.length;i++)m[ZODIAC[i]]=hi+1;
+  for(var j=0;j<lim;j++){
+    var d=this.draws[j],ks=special?[6]:[0,1,2,3,4,5];
+    for(var t=0;t<ks.length;t++){var z=d.zodiac[ks[t]];if(z==null)continue;if(m[z]===hi+1)m[z]=j;}
+  }
+  return m;
+};
 /* 近窗加权生肖计数：第 i 期（从新到旧）每个命中生肖加 (WINDOW - i) */
 Store.prototype.zodiacWeightedCount=function(special){
   var m=zmap(),lim=Math.min(WINDOW,this.draws.length);
@@ -605,7 +626,10 @@ Store.prototype.saveReco=function(){
   try{
     var arr=this.recoHistory.map(function(h){
       return {issue:h.issue,ts:h.ts,flats:h.flats,specials:h.specials,
-        flatHit:h.flatHit,specialHit:h.specialHit,specialHitNum:h.specialHitNum,judged:h.judged};});
+        flatHit:h.flatHit,specialHit:h.specialHit,specialHitNum:h.specialHitNum,judged:h.judged,
+        onlineZ:h.onlineZ||[],flatZ:h.flatZ||[],specZ:h.specZ||[],
+        onlineCodes:h.onlineCodes||[],onlineZHit:h.onlineZHit||0,
+        flatZHit:h.flatZHit||0,onlineSpHit:h.onlineSpHit||0,specialReal:h.specialReal||0};});
     LS.set('xam_reco',JSON.stringify(arr));
   }catch(e){}
 };
@@ -618,12 +642,17 @@ Store.prototype.loadReco=function(){
       if(!o.issue)continue;
       this.recoHistory.push({issue:o.issue,ts:o.ts||0,
         flats:o.flats||[],specials:o.specials||[],flatHit:o.flatHit||[],
-        specialHit:o.specialHit||0,specialHitNum:o.specialHitNum||0,judged:o.judged||0});
+        specialHit:o.specialHit||0,specialHitNum:o.specialHitNum||0,judged:o.judged||0,
+        onlineZ:o.onlineZ||[],flatZ:o.flatZ||[],specZ:o.specZ||[],onlineCodes:o.onlineCodes||[],
+        onlineZHit:o.onlineZHit||0,flatZHit:o.flatZHit||0,onlineSpHit:o.onlineSpHit||0,
+        specialReal:o.specialReal||0});
     }
   }catch(e){}
 };
-Store.prototype.saveRecoSnapshot=function(issue,flats,specials){
+Store.prototype.saveRecoSnapshot=function(issue,flats,specials,extra){
   if(!issue||!flats||!specials)return;
+  extra=extra||{};
+  var zone=function(a){return (a&&a.length)?a.slice():[];};
   try{
     var found=false;
     for(var i=0;i<this.recoHistory.length;i++){
@@ -633,12 +662,17 @@ Store.prototype.saveRecoSnapshot=function(issue,flats,specials){
         h.ts=Date.now();h.flats=flats.slice();h.specials=specials.slice();
         h.flatHit=new Array(flats.length);for(var q=0;q<h.flatHit.length;q++)h.flatHit[q]=0;
         h.specialHit=0;h.specialHitNum=0;
+        h.onlineZ=zone(extra.onlineZ);h.flatZ=zone(extra.flatZ);h.specZ=zone(extra.specZ);
+        h.onlineCodes=zone(extra.onlineCodes);
+        h.onlineZHit=0;h.flatZHit=0;h.onlineSpHit=0;h.specialReal=0;
       }
       found=true;
     }
     if(!found){
       var nh={issue:issue,ts:Date.now(),flats:flats.slice(),specials:specials.slice(),
-        flatHit:new Array(flats.length),specialHit:0,specialHitNum:0,judged:0};
+        flatHit:new Array(flats.length),specialHit:0,specialHitNum:0,judged:0,
+        onlineZ:zone(extra.onlineZ),flatZ:zone(extra.flatZ),specZ:zone(extra.specZ),
+        onlineCodes:zone(extra.onlineCodes),onlineZHit:0,flatZHit:0,onlineSpHit:0,specialReal:0};
       for(var q2=0;q2<nh.flatHit.length;q2++)nh.flatHit[q2]=0;
       this.recoHistory.unshift(nh);
     }
@@ -657,16 +691,40 @@ Store.prototype.judgeRecoHistory=function(){
         if(this.draws[j].issue===h.issue){d=this.draws[j];break;}
       }
       if(!d)continue;
+      /* 平码：开奖前 6 个号 */
       if(h.flatHit.length!==h.flats.length)h.flatHit=new Array(h.flats.length);
       for(var k=0;k<h.flats.length;k++){
         var hit=0;
         for(var b=0;b<6;b++)if(h.flats[k]===d.nums[b]){hit=1;break;}
         h.flatHit[k]=hit;
       }
+      /* 特码 */
       h.specialHit=0;h.specialHitNum=0;
       for(var k2=0;k2<h.specials.length;k2++){
         if(h.specials[k2]===d.nums[6]){h.specialHit=1;h.specialHitNum=d.nums[6];break;}
       }
+      h.specialReal=d.nums[6]||0;
+      /* 生肖命中：按平码 6 个生肖 / 特码生肖 分别判定（去重生肖） */
+      var flatZSet={},specialZ=d.zodiac[6]||'';
+      for(var b2=0;b2<6;b2++){var fz=d.zodiac[b2];if(fz)flatZSet[fz]=1;}
+      var zhF=function(arr){
+        var out=[];
+        if(!arr)return out;
+        for(var t=0;t<arr.length;t++)out.push(flatZSet[arr[t]]?1:0);
+        return out;
+      };
+      var zhS=function(arr){
+        var out=[];
+        if(!arr)return out;
+        for(var t3=0;t3<arr.length;t3++)out.push((arr[t3]&&arr[t3]===specialZ)?1:0);
+        return out;
+      };
+      h.flatZHit=zhF(h.flatZ);
+      h.specZHit=zhS(h.specZ);
+      h.onlineZHit=zhS(h.onlineZ);
+      var oh=[];
+      for(var t2=0;t2<(h.onlineCodes||[]).length;t2++)oh.push(h.onlineCodes[t2]===d.nums[6]?1:0);
+      h.onlineSpHit=oh;
       h.judged=1;changed=true;
     }
     if(changed)this.saveReco();
@@ -690,6 +748,108 @@ Store.prototype.checkAlerts=function(){
    全局同步节流 + 轮询（对齐 AutoSync.java）
    ============================================================ */
 var store=new Store();
+/* ---------- 特码推荐号码图（18码中特图，来源：六合论坛） ----------
+   数据源 /api/six-pictures?title=18码中特图（type=21 澳门），alias=18ma；
+   图片 CDN 形如 https://amo.jlidesign.com:4949/col/<期>/18ma.jpg。
+   缓存 10 分钟，接口取「期号最大」的一张；接口不通时按图源目录规则直拼兜底。 */
+var pic18={issue:'',url:'',err:'',loading:false,ts:0};
+(function(){
+  try{
+    var s=LS.get('xam_pic18','');
+    if(s){var o=JSON.parse(s);if(o&&o.url){pic18.issue=o.issue||'';pic18.url=o.url;pic18.ts=o.ts||0;}}
+  }catch(e){}
+})();
+function pic18Save(){
+  try{LS.set('xam_pic18',JSON.stringify({issue:pic18.issue,url:pic18.url,ts:pic18.ts}));}catch(e){}
+}
+function pic18Abs(u){
+  u=String(u||'');if(!u)return '';
+  if(u.slice(0,2)==='//')return 'https:'+u;
+  if(u.charAt(0)==='/')return SITE+u;
+  return u;
+}
+function pic18Guess(issShort){return PIC_HOST+'/'+issShort+'/'+PIC18_ALIAS+'.jpg';}
+/* 当前应展示的图地址：接口结果优先，否则按「待开期」直拼 */
+function pic18Url(){
+  if(pic18.url)return pic18.url;
+  if(!store.draws.length)return '';
+  var iss=store.nextIssueOf(store.draws[0].issue)||store.draws[0].issue;
+  return iss?pic18Guess(iss.length===7?iss.slice(4):iss):'';
+}
+function pic18Html(){
+  var u=pic18Url(),s='<div id="pic18box">';
+  if(!u){
+    s+='<div class="picerr">'+(pic18.err?('图源暂不可用：'+esc(pic18.err)):'图片待联网加载…')+'</div>';
+  }else{
+    var iss=pic18.issue?(pic18.issue.length===7?pic18.issue.slice(4):pic18.issue):'';
+    var tip=iss?('第'+esc(iss)+'期 · 图内为网站给出的 18 码中特号码'):'联网后自动更新图号';
+    s+='<img class="pic" src="'+esc(u)+'" alt="18码中特图" onclick="zoomPic(\''+esc(u)+'\')" '+
+       'onerror="this.style.display=\'none\';this.nextSibling.style.display=\'block\'">'+
+       '<div class="picerr" style="display:none">图片加载失败，点顶部「刷新」重试</div>'+
+       '<div class="tip">'+tip+'</div>';
+  }
+  return s+'</div>';
+}
+/* 只替换图片容器，避免整页重绘（保持滚动位置） */
+function pic18Render(){
+  var b=document.getElementById('pic18box');
+  if(!b)return;
+  var par=b.parentNode;if(!par)return;            /* 卡片未挂载/已卸载时静默跳过 */
+  var d=document.createElement('div');
+  d.innerHTML=pic18Html();
+  if(!d.firstChild)return;
+  par.replaceChild(d.firstChild,b);
+}
+function loadPic18(force){
+  /* 进行中则复用同一 Promise，避免并发调用拿到假的 false（启动预热与刷新撞车时常见） */
+  if(pic18.loading)return pic18.pending||Promise.resolve(false);
+  if(!force&&pic18.url&&Date.now()-pic18.ts<PIC18_FRESH_MS)return Promise.resolve(false);
+  pic18.loading=true;
+  pic18.pending=httpGetRaw(PIC18_API,20000).then(function(body){
+    pic18.loading=false;
+    if(isErr(body)){pic18.err=body;pic18Render();return false;}
+    var arr=[];
+    try{var d=JSON.parse(String(body).trim());arr=(d&&d.data)||[];}catch(e){}
+    var best=null;
+    for(var i=0;i<arr.length;i++){
+      var o=arr[i];
+      if(!o||!o.url)continue;
+      if(String(o.alias||'')!==PIC18_ALIAS)continue;
+      if(!best||(parseInt(o.issue,10)||0)>(parseInt(best.issue,10)||0))best=o;
+    }
+    if(best){
+      pic18.issue=String(best.issue||'');
+      pic18.url=pic18Abs(best.url);
+      pic18.ts=Date.now();pic18.err='';pic18Save();
+    }else{
+      pic18.err='接口暂无 18 码中特图';
+    }
+    pic18Render();
+    return !!best;
+  }).catch(function(e){
+    pic18.loading=false;pic18.pending=null;pic18.err=(e&&e.message)||'加载失败';pic18Render();return false;
+  });
+  return pic18.pending;
+}
+/* ---------- ⑤ 18码中特图：折叠态 + 刷新联动 ---------- */
+function picOpen(){return LS.get('xam_pic18_open','1')==='1';}
+function picToggle(){
+  var on=!picOpen();
+  LS.set('xam_pic18_open',on?'1':'0');
+  var b=document.getElementById('pic18wrap');if(b)b.style.display=on?'':'none';
+  var btn=document.getElementById('pic18Btn');
+  if(btn){btn.textContent=on?'收起 ▲':'展开 ▼';btn.style.background=on?C.card2:C.acc;}
+}
+function loadPic18Soon(force){setTimeout(function(){try{loadPic18(force);}catch(e){}},90);}
+function pic18CardHtml(){
+  var open=picOpen();
+  return '<div class="ln" style="margin-top:9px;padding-top:8px;border-top:1px solid '+C.card2+'">'+
+    '<span style="color:'+C.gold+';font-size:11px;font-weight:700">18码中特图 · 特码推荐号码图</span>'+
+    '<div style="text-align:right;margin-top:5px">'+
+    '<button id="pic18Btn" class="hbtn" style="background:'+(open?C.card2:C.acc)+'" onclick="picToggle()">'+(open?'收起 ▲':'展开 ▼')+'</button></div></div>'+
+    '<div id="pic18wrap" class="picwrap" style="display:'+(open?'':'none')+'">'+pic18Html()+'</div>';
+}
+
 var syncState={busy:false,lastOk:0};
 var lastIssue='',lastPredIssue='';
 var statusText='准备中…';
@@ -733,7 +893,7 @@ function syncNow(hint,force){
       var predInfo=store.prediction?' · 在线预测第'+store.prediction.issue+'期':'';
       var lsInfo=LS.ok?'':' · ⚠本次不保存（存储受限）';
       setStatus('✓ 已自动同步 · 最新第'+cur+'期 · 共'+store.draws.length+'期'+predInfo+lsInfo+' · '+Math.round(POLL_MS/1000)+'秒后自动再查');
-      if(changed){render();return true;}
+      if(changed){render();loadPic18Soon(false);return true;}
     }else{
       /* 离线（file:// 打开 / 无网）且有内嵌数据 → 给出明确可用的状态，不留失败红字 */
       if(store.draws.length){
@@ -808,53 +968,60 @@ function homeLatestHtml(){
   return s+'</div>';
 }
 function homeRecoHtml(){
-  var s='<div class="card"><div class="sec">本期推荐（按杀生肖概率）</div>';
+  var s='<div class="card"><div class="sec">本期推荐</div>';
   if(!store.draws.length)return s+'<div class="ln" style="color:'+C.sub+'">暂无数据，点刷新抓取</div></div>';
-  /* 杀特码生肖：优先在线，回退本地算法 */
-  var kill=store.onlineKillZodiacs(),online=kill.length>0;
-  if(!online)kill=store.killZodiacs(true);
-  s+='<div class="ln" style="color:'+C.bad+'">杀特码生肖（'+(online?'在线':'本地')+'）：'+esc(kill.join(' '))+'</div>';
-  /* 推荐生肖：在线六肖中特，回退保留生肖前 6 */
-  var recZ=store.onlineRecommendZodiacs(),recOnline=recZ.length>0;
-  if(!recOnline){var keep=store.keepZodiacs(true);recZ=keep.slice(0,6);}
-  s+='<div class="ln" style="color:'+C.ok+'">推荐生肖（'+(recOnline?'在线·六肖中特':'本地')+'）：'+esc(recZ.join(' '))+'</div>';
-  /* 在线精选码 */
   var p=store.prediction;
-  if(p){
-    function codes(arr){return arr.map(function(v){return pad(v)+'('+zodiacOfNum(v)+')';}).join(' ');}
-    if(p.codes1.length)s+='<div class="ln" style="color:'+C.gold+'">精选1码：'+esc(codes(p.codes1))+'</div>';
-    if(p.codes5.length)s+='<div class="ln" style="color:'+C.gold+'">精选5码：'+esc(codes(p.codes5))+'</div>';
-    if(p.codes10.length)s+='<div class="ln" style="color:'+C.gold+'">精选10码：'+esc(codes(p.codes10))+'</div>';
-    s+='<div class="ln" style="color:'+C.sub+';font-size:10px">在线预测第'+esc(p.issue)+'期 · 来源：六合论坛</div>';
-  }else{
-    s+='<div class="ln" style="color:'+C.sub+';font-size:10px">在线预测加载中，点刷新获取</div>';
-  }
-  /* 本地平码推荐 3 组 */
-  s+='<div class="ln" style="color:'+C.txt+'">本地平码推荐 3 组（近'+WINDOW+'期加权）：</div>';
-  var flat=store.recommendFlat(3);
-  for(var g=0;g<flat.length;g++){
-    s+='<div class="ln" style="color:'+C.ok+'">第'+(g+1)+'组：'+esc(flat[g].map(function(v){return pad(v)+'('+zodiacOfNum(v)+')';}).join(' '))+'</div>';
-  }
-  /* 平码推荐生肖（去重取 6） */
-  var fz=[];
+  /* ===== ① 平码栏 ===== */
+  s+='<div class="zcol" style="border-left-color:'+C.ok+'">'+
+    '<div class="zcolt" style="color:'+C.ok+'">平码</div>';
+  /* 在线生肖（六肖中特） */
+  var recZ=store.onlineRecommendZodiacs(),recOnline=recZ.length>0;
+  if(recOnline)s+='<div class="ln">在线生肖：'+esc(recZ.join(' '))+'<span class="tag">在线</span></div>';
+  /* 本地平码生肖（6 个） */
+  var flat=store.recommendFlat(3),fz=[];
   for(var g2=0;g2<flat.length&&fz.length<6;g2++){
     for(var i=0;i<flat[g2].length&&fz.length<6;i++){
       var z=zodiacOfNum(flat[g2][i]);
       if(z&&fz.indexOf(z)<0)fz.push(z);
     }
   }
-  s+='<div class="ln" style="color:'+C.ok+'">平码推荐生肖（6个）：'+esc(fz.join(' '))+'</div>';
-  /* 特码推荐 6 个 */
-  var sp=store.recommendSpecial(6);
-  s+='<div class="ln" style="color:'+C.gold+'">特码推荐：'+esc(sp.map(function(v){return pad(v)+'('+zodiacOfNum(v)+')';}).join(' '))+'</div>';
-  var sz=[];
+  s+='<div class="ln">本地生肖：'+esc(fz.join(' '))+'<span class="tag">本地</span></div>';
+  /* 本地平码 3 组号码 */
+  for(var g=0;g<flat.length;g++){
+    s+='<div class="ln" style="font-size:12px;color:'+C.ok+'">第'+(g+1)+'组：'+esc(flat[g].map(function(v){return pad(v)+'('+zodiacOfNum(v)+')';}).join(' '))+'</div>';
+  }
+  s+='</div>';
+  s+=recoHistFoldHtml();   /* ③ 平码留档（折叠，含在线/本地两路） */
+  /* ===== ② 特码栏 ===== */
+  s+='<div class="zcol" style="border-left-color:'+C.gold+'">'+
+    '<div class="zcolt" style="color:'+C.gold+'">特码</div>';
+  var kill=store.onlineKillZodiacs(),online=kill.length>0;
+  if(!online)kill=store.killZodiacs(true);
+  s+='<div class="ln">杀生肖：'+esc(kill.join(' '))+'<span class="tag">'+(online?'在线':'本地')+'</span></div>';
+  if(recOnline)s+='<div class="ln">在线生肖：'+esc(recZ.join(' '))+'<span class="tag">在线·中特</span></div>';
+  if(p){
+    function codes(arr){return arr.map(function(v){return pad(v)+'('+zodiacOfNum(v)+')';}).join(' ');}
+    if(p.codes1.length)s+='<div class="ln" style="color:'+C.gold+';font-size:12px">精选1码：'+esc(codes(p.codes1))+'</div>';
+    if(p.codes5.length)s+='<div class="ln" style="color:'+C.gold+';font-size:12px">精选5码：'+esc(codes(p.codes5))+'</div>';
+    if(p.codes10.length)s+='<div class="ln" style="color:'+C.gold+';font-size:12px">精选10码：'+esc(codes(p.codes10))+'</div>';
+    s+='<div class="ln" style="color:'+C.sub+';font-size:10px">在线预测第'+esc(p.issue)+'期 · 来源：六合论坛</div>';
+  }else{
+    s+='<div class="ln" style="color:'+C.sub+';font-size:10px">在线预测加载中，点刷新获取</div>';
+  }
+  var sp=store.recommendSpecial(6),sz=[];
   for(var i2=0;i2<sp.length;i2++){var z2=zodiacOfNum(sp[i2]);if(z2&&sz.indexOf(z2)<0)sz.push(z2);}
-  s+='<div class="ln" style="color:'+C.gold+'">特码推荐生肖：'+esc(sz.join(' '))+'</div>';
-  /* v3.0 存档：目标期 = 最新期+1，按期号去重；未判定的可被覆盖刷新 */
+  s+='<div class="ln" style="font-size:12px;color:'+C.gold+'">本地特码：'+esc(sp.map(function(v){return pad(v)+'('+zodiacOfNum(v)+')';}).join(' '))+'</div>';
+  s+='<div class="ln" style="font-size:12px;color:'+C.gold+'">本地生肖：'+esc(sz.join(' '))+'<span class="tag">本地</span></div>';
+  s+=pic18CardHtml();   /* ⑤ 18码中特图（特码推荐号码图） */
+  s+='</div>';
+  /* ===== 存档：目标期 = 最新期+1，两栏并记 ===== */
   var target=store.nextIssueOf(store.draws[0].issue);
   if(target){
     var fl=[];for(var g3=0;g3<flat.length;g3++)for(var k=0;k<flat[g3].length;k++)fl.push(flat[g3][k]);
-    store.saveRecoSnapshot(target,fl,sp);
+    store.saveRecoSnapshot(target,fl,sp,{
+      onlineZ:recZ,flatZ:fz,specZ:sz,
+      onlineCodes:p?p.codes10:[]
+    });
   }
   return s+'</div>';
 }
@@ -869,61 +1036,84 @@ function numLine(label,nums,hits,judged,base){
   }
   return s+'</div>';
 }
-/* 推荐历史折叠状态：0=收起 1=展开（持久化，重绘后保持） */
-function histOpen(){return LS.get('xam_hist_open','0')==='1';}
-function toggleHist(){
-  var on=!histOpen();
-  LS.set('xam_hist_open',on?'1':'0');
-  var b=document.getElementById('histBody');
-  if(b)b.style.display=on?'':'none';
-  var btn=document.getElementById('histBtn');
-  if(btn){
-    btn.textContent=on?'收起 ▲':'展开 ▼';
-    btn.style.background=on?C.card2:C.acc;
-  }
+/* 折叠通用：状态持久化（0=收起 1=展开），重绘后保持 */
+function foldOpen(key){return LS.get(key,'0')==='1';}
+function toggleFold(key,bodyId,btnId){
+  var on=!foldOpen(key);
+  LS.set(key,on?'1':'0');
+  var b=document.getElementById(bodyId);if(b)b.style.display=on?'':'none';
+  var btn=document.getElementById(btnId);
+  if(btn){btn.textContent=on?'收起 ▲':'展开 ▼';btn.style.background=on?C.card2:C.acc;}
 }
-function homeHistoryHtml(){
-  var hs=store.recoHistory;
-  var judged=0,flatAll=0,flatHit=0,spAll=0,spHit=0;
-  for(var i=0;i<hs.length;i++){
-    var h=hs[i];if(h.judged===0)continue;
-    judged++;flatAll+=h.flatHit.length;
-    for(var k=0;k<h.flatHit.length;k++)if(h.flatHit[k]===1)flatHit++;
-    if(h.specials.length){spAll++;if(h.specialHit===1)spHit++;}
-  }
-  var open=histOpen();
-  var s='<div class="card"><div class="histhead">'+
-    '<div class="sec">推荐历史<span class="sechint">每期命中追踪</span></div>';
-  if(hs.length)s+='<button id="histBtn" class="hbtn" style="background:'+(open?C.card2:C.acc)+'" onclick="toggleHist()">'+(open?'收起 ▲':'展开 ▼')+'</button>';
+/* ③ 平码留档（折叠）：在线生肖（六肖中特）与本地平码两路命中追踪 */
+function toggleRecoHist(){toggleFold('xam_recohist_open','recoHistBody','recoHistBtn');}
+function recoHistFoldHtml(){
+  var hs=store.recoHistory,open=foldOpen('xam_recohist_open');
+  var s='<div class="ln" style="margin-top:9px;padding-top:8px;border-top:1px solid '+C.card2+'">'+
+    '<span style="color:'+C.sub+';font-size:11px">平码留档 · 在线/本地命中追踪</span>';
+  if(hs.length)s+='<div style="text-align:right;margin-top:5px">'+
+    '<button id="recoHistBtn" class="hbtn" style="background:'+(open?C.card2:C.acc)+'" onclick="toggleRecoHist()">'+(open?'收起 ▲':'展开 ▼')+'</button></div>';
   s+='</div>';
-  if(!hs.length)return s+'<div class="ln" style="color:'+C.sub+';font-size:12px">暂无记录：推荐生成后自动存档，开奖后自动判定命中</div></div>';
-  if(judged>0)s+='<div class="ln" style="color:'+C.acc+';font-size:12px">已追踪 '+judged+' 期 · 平码命中 '+flatHit+'/'+flatAll+' · 特码中 '+spHit+'/'+spAll+' 期</div>';
-  else s+='<div class="ln" style="color:'+C.sub+';font-size:11px">已存档 '+hs.length+' 期 · 点「展开」看每期明细（开奖后自动判定命中）</div>';
-  s+='<div id="histBody" style="display:'+(open?'':'none')+'">';
+  if(!hs.length)return s+'<div class="ln" style="color:'+C.sub+';font-size:10px">暂无留档：本期推荐自动存档，开奖后回写命中</div>';
+  var judged=0,onAll=0,onHit=0,loAll=0,loHit=0,flAll=0,flHit=0;
+  for(var i=0;i<hs.length;i++){
+    var h0=hs[i];if(h0.judged===0)continue;judged++;
+    var oz0=h0.onlineZ||[],ozh=(h0.onlineZHit&&h0.onlineZHit.length)?h0.onlineZHit:[];
+    for(var a=0;a<oz0.length;a++){onAll++;if(ozh[a]===1)onHit++;}
+    var lz0=h0.flatZ||[],lzh0=(h0.flatZHit&&h0.flatZHit.length)?h0.flatZHit:[];
+    for(var b=0;b<lz0.length;b++){loAll++;if(lzh0[b]===1)loHit++;}
+    var fh0=h0.flatHit||[];
+    for(var c=0;c<fh0.length;c++){flAll++;if(fh0[c]===1)flHit++;}
+  }
+  if(judged>0)s+='<div class="ln" style="color:'+C.acc+';font-size:11px">已追踪 '+judged+' 期 · 平码 '+flHit+'/'+flAll+' · 在线肖 '+onHit+'/'+onAll+' · 本地肖 '+loHit+'/'+loAll+'</div>';
+  else s+='<div class="ln" style="color:'+C.sub+';font-size:10px">已留档 '+hs.length+' 期 · 开奖后自动判定命中</div>';
+  s+='<div id="recoHistBody" style="display:'+(open?'':'none')+'">';
   var show=Math.min(12,hs.length);
   for(var j=0;j<show;j++){
-    var h2=hs[j],fh=0;
-    for(var k2=0;k2<h2.flatHit.length;k2++)if(h2.flatHit[k2]===1)fh++;
-    if(h2.judged!==0){
-      s+='<div class="ln" style="font-weight:700;font-size:11px;margin-top:7px;color:'+(h2.specialHit===1?C.gold:C.txt)+'">第'+esc(h2.issue)+'期 · 平码 '+fh+'/'+h2.flatHit.length+' 中 · 特码'+(h2.specialHit===1?'中★':'未中')+'</div>';
+    var h=hs[j],fh=0,fhs=h.flatHit||[];
+    for(var k=0;k<fhs.length;k++)if(fhs[k]===1)fh++;
+    var ozs=h.onlineZ||[],lzs=h.flatZ||[],cz=h.onlineCodes||[];
+    if(h.judged===0){
+      s+='<div class="ln" style="font-weight:700;font-size:11px;margin-top:7px;color:'+C.sub+'">第'+esc(h.issue)+'期 · 待开奖</div>';
     }else{
-      s+='<div class="ln" style="font-weight:700;font-size:11px;margin-top:7px;color:'+C.sub+'">第'+esc(h2.issue)+'期 · 待开奖</div>';
+      var oh=0,ozh2=h.onlineZHit||[];
+      for(var k1=0;k1<ozs.length;k1++)if(ozh2[k1]===1)oh++;
+      s+='<div class="ln" style="font-weight:700;font-size:11px;margin-top:7px;color:'+(oh>0?C.gold:C.txt)+'">第'+esc(h.issue)+'期 · 平码 '+fh+'/'+(h.flats?h.flats.length:0)+' 中 · 在线肖 '+(oh>0?'中★':'未中')+'</div>';
     }
-    for(var g=0;g<3;g++){
-      var st=g*6;if(st>=h2.flats.length)break;
-      var cnt=Math.min(6,h2.flats.length-st),seg=[],hit=[];
-      for(var k3=0;k3<cnt;k3++){seg.push(h2.flats[st+k3]);hit.push((st+k3<h2.flatHit.length)?h2.flatHit[st+k3]:0);}
-      s+=numLine('平'+'①②③'.charAt(g)+' ',seg,hit,h2.judged!==0,C.ok);
-    }
-    var sh=[];
-    for(var k4=0;k4<h2.specials.length;k4++){
-      sh.push((h2.judged!==0&&h2.specialHitNum!==0&&h2.specials[k4]===h2.specialHitNum)?1:0);
-    }
-    s+=numLine('特码 ',h2.specials,sh,h2.judged!==0,C.gold);
+    if(ozs.length)s+=numLine('在线 ',ozs,h.onlineZHit,h.judged!==0,C.acc);
+    if(lzs.length)s+=numLine('本地 ',lzs,h.flatZHit,h.judged!==0,C.ok);
+    if(cz.length&&h.judged!==0&&h.specialReal)s+='<div class="ln" style="font-size:11px">在线18码：实开 '+
+      pad(h.specialReal)+' → '+((h.onlineSpHit&&h.onlineSpHit.length)?(h.onlineSpHit.indexOf(1)>=0?'命中★':'未中'):'-')+'</div>';
   }
-  if(hs.length>12)s+='<div class="ln" style="color:'+C.sub+';font-size:10px">（共 '+hs.length+' 期存档，显示最近 12 期）</div>';
-  return s+'</div></div>';
+  if(hs.length>12)s+='<div class="ln" style="color:'+C.sub+';font-size:10px">（共 '+hs.length+' 期留档，显示最近 12 期）</div>';
+  return s+'</div>';
 }
+/* ④ 生肖遗漏历史检查点：从最新往回每 step 期取一个检查点，记录该肖当时遗漏值 */
+function zodiacOmitCheckpoints(special,step,count){
+  var total=store.draws.length,out=[],hi=0;
+  while(hi<total&&out.length<count){
+    out.push({hi:hi,issue:(store.draws[hi]&&store.draws[hi].issue)||'',last:store.zodiacLastIndexRange(hi,special)});
+    hi+=step;
+  }
+  return out;
+}
+function toggleOmit(sp){toggleFold(sp?'xam_omit_open_s':'xam_omit_open_f',sp?'omitBody_s':'omitBody_f',sp?'omitBtn_s':'omitBtn_f');}
+function omitHistHtml(special){
+  var ck=zodiacOmitCheckpoints(special,3,8);
+  if(ck.length<2)return '';
+  var s='<div class="tip">历史遗漏记录：从最新往回每 3 期一个检查点 · 数值为当时未出期数（带 + 表示区间内未出现）</div>';
+  for(var z=0;z<ZODIAC.length;z++){
+    var seq=[];
+    for(var c=0;c<ck.length;c++){
+      var v=ck[c].last[ZODIAC[z]];
+      seq.push(v>ck[c].hi?(ck[c].hi+1)+'+':String(v));
+    }
+    s+='<div class="hrow"><span class="k" style="width:34px;font-weight:700">'+ZODIAC[z]+'</span>'+
+      '<span style="flex:1 1 auto;font-size:11px;color:'+C.sub+'">'+seq.join(' / ')+'</span></div>';
+  }
+  return s;
+}
+
 function homeColdHtml(){
   var s='<div class="card"><div class="sec">冷门号预览</div>'+
     '<div class="tip">绿='+COLD_T1+'期以上未开 · 红='+COLD_T2+'期以上未开（数据驱动）</div>';
@@ -967,7 +1157,7 @@ function homeListHtml(){
   return s+'</div>';
 }
 function homeHtml(){
-  return homeLatestHtml()+homeRecoHtml()+homeHistoryHtml()+homeColdHtml()+homeZodiacHtml()+homeListHtml()+
+  return homeLatestHtml()+homeRecoHtml()+homeColdHtml()+homeZodiacHtml()+homeListHtml()+
     '<div class="foot">数据来源：macaumarksix.com 接口 · 每期开奖后自动累积 · 仅供娱乐参考</div>';
 }
 
@@ -1026,14 +1216,20 @@ function killBlockHtml(special){
   });
   var maxOmit=1;
   for(var i=0;i<zs.length;i++){var o=(last[zs[i]]==null?total:last[zs[i]]);if(o>maxOmit)maxOmit=o;}
-  s+='<div class="card"><div class="sec">生肖遗漏（越久未出）</div>';
-  for(var j=0;j<zs.length;j++){
-    var om=(last[zs[j]]==null?total:last[zs[j]]);
-    s+='<div class="hrow"><span class="k" style="width:34px;font-weight:700">'+zs[j]+'</span>'+
-      '<span class="barwrap"><i class="bar" style="width:'+Math.max(Math.round(om/maxOmit*150),2)+'px;height:16px"></i></span>'+
-      '<span class="v" style="width:46px">'+om+'期</span></div>';
+  var oOpen=foldOpen(special?'xam_omit_open_s':'xam_omit_open_f');
+  var omitL=[];
+  for(var j=0;j<zs.length;j++){var ov=(last[zs[j]]==null?total:last[zs[j]]);omitL.push({z:zs[j],o:ov});}
+  s+='<div class="card"><div class="histhead"><div><div class="sec">生肖遗漏（越久未出）</div>'+
+    '<div class="sechint">最久未出：'+omitL[0].z+' '+omitL[0].o+' 期</div></div>'+
+    '<button id="omitBtn_'+(special?'s':'f')+'" class="hbtn" style="background:'+(oOpen?C.card2:C.acc)+'" onclick="toggleOmit('+(special?'true':'false')+')">'+(oOpen?'收起 ▲':'展开 ▼')+'</button></div>'+
+    '<div id="omitBody_'+(special?'s':'f')+'" style="display:'+(oOpen?'':'none')+'">';
+  for(var j3=0;j3<omitL.length;j3++){
+    s+='<div class="hrow"><span class="k" style="width:34px;font-weight:700">'+omitL[j3].z+'</span>'+
+      '<span class="barwrap"><i class="bar" style="width:'+Math.max(Math.round(omitL[j3].o/maxOmit*150),2)+'px;height:16px"></i></span>'+
+      '<span class="v" style="width:46px">'+omitL[j3].o+'期</span></div>';
   }
-  s+='</div>';
+  s+=omitHistHtml(special);
+  s+='</div></div>';
   /* 杀生肖建议：在线优先（八肖中特之外为杀），回退本地算法 */
   s+='<div class="card"><div class="sec">本期杀生肖建议</div>';
   var kill=store.onlineKillZodiacs(),online=kill.length>0;
@@ -1549,7 +1745,7 @@ function navHtml(){
   return s+'</div>';
 }
 function tap(k){
-  if(k==='refresh'){syncNow('正在抓取最新开奖…',true);return;}
+  if(k==='refresh'){loadPic18Soon(true);syncNow('正在抓取最新开奖…',true);return;}
   if(k===page)return;
   page=k;
   render();
@@ -1585,6 +1781,7 @@ window.addEventListener('resize',function(){if(page==='kill')afterKill();});
 render();
 startPoll();
 syncNow('正在同步最新开奖…',true);
+loadPic18Soon(false);
 
 /* ============================================================
    PWA 增强：manifest + apple-touch-icon（单文件自注入，无需外部资源）

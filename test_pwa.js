@@ -47,7 +47,7 @@ let FAIL = 0, PASS = 0;
 function ok(cond, msg) { console.log((cond ? 'PASS  ' : 'FAIL  ') + msg); if (cond) PASS++; else FAIL++; }
 
 try {
-  (0, eval)(code + '\n;globalThis.__T={store,zodiacOfNum,ZODIAC,pad,render,homeHtml,coldHtml,killHtml,patternHtml,trendHtml,hotHtml,syncNow,C,COLD_T1,COLD_T2,WINDOW};');
+  (0, eval)(code + '\n;globalThis.__T={store,zodiacOfNum,ZODIAC,pad,render,homeHtml,coldHtml,killHtml,patternHtml,trendHtml,hotHtml,syncNow,C,COLD_T1,COLD_T2,WINDOW,pic18,loadPic18,picOpen,picToggle,pic18Html,pic18CardHtml,loadPic18Soon};');
 } catch (e) {
   console.log('FAIL  脚本执行异常: ' + e.message);
   process.exit(1);
@@ -148,35 +148,64 @@ waitDraws(90000).then(async () => {
   /* 5b. 在线预测：显式拉一次（幂等），避免与启动同步的时序竞态 */
   await store.fetchPrediction();
   const onlineKill = store.onlineKillZodiacs(), rec6 = store.onlineRecommendZodiacs();
-  ok(onlineKill.length === 4 && rec6.length === 6 && store.prediction.zodiac8.length === 8,
-    '在线八肖中特：推荐六肖 ' + rec6.join('') + ' / 八肖 ' + store.prediction.zodiac8.join('') + ' / 杀 ' + onlineKill.join('') + '（12-8=4）');
-  ok(store.prediction && store.prediction.issue === target, '在线预测期号 = 目标期 ' + target + '（实得 ' + (store.prediction ? store.prediction.issue : 'null') + '）');
-  ok(store.prediction.codes1.length === 1 && store.prediction.codes5.length === 5 && store.prediction.codes10.length === 10,
-    '在线精选码 1/5/10 码数量正确 → ' + store.prediction.codes10.map(T.pad).join(' '));
+  if (!store.prediction) {
+    /* 接口只保留「未结算(result=0)」条目；开奖刚结束到下一期预测发布之间会出现空档，属数据时点现象 */
+    console.log('SKIP  在线预测接口当前无「未结算」条目（开奖间歇期），跳过在线八肖 / 精选码断言');
+  } else {
+    ok(onlineKill.length === 4 && rec6.length === 6 && store.prediction.zodiac8.length === 8,
+      '在线八肖中特：推荐六肖 ' + rec6.join('') + ' / 八肖 ' + store.prediction.zodiac8.join('') + ' / 杀 ' + onlineKill.join('') + '（12-8=4）');
+    ok(store.prediction.issue === target, '在线预测期号 = 目标期 ' + target + '（实得 ' + store.prediction.issue + '）');
+    ok(store.prediction.codes1.length === 1 && store.prediction.codes5.length === 5 && store.prediction.codes10.length === 10,
+      '在线精选码 1/5/10 码数量正确 → ' + store.prediction.codes10.map(T.pad).join(' '));
+  }
+
+  /* 5c. 18码中特图：真实接口 → alias=18ma 筛选 / 期号最大 / 图片可渲染 */
+  try {
+    const got = await T.loadPic18(true);
+    ok(!!got && !!T.pic18.url, '18码中特图接口取到图 → ' + T.pic18.url);
+    ok(/\/col\/\d+\/18ma\.jpg$/.test(T.pic18.url) && !!T.pic18.issue,
+      '图地址形如 /col/<期>/18ma.jpg（期号 ' + T.pic18.issue + '）');
+    const picH = T.pic18Html();
+    ok(picH.indexOf('<img class="pic"') >= 0 && picH.indexOf('18码中特图') >= 0,
+      '18码中特图卡片渲染出 <img> 标签（' + picH.length + ' 字节）');
+    const cardH = T.pic18CardHtml();
+    ok(cardH.indexOf('pic18wrap') >= 0 && cardH.indexOf('picToggle()') >= 0, '18码中特图卡片可折叠（pic18wrap + 切换按钮）');
+  } catch (e) {
+    ok(false, '18码中特图测试异常: ' + (e && e.stack || e));
+  }
 
   /* 7. 推荐历史存档 / 判定 */
   const fl = [].concat.apply([], flat);
   store.saveRecoSnapshot(target, fl, sp);
-  ok(store.recoHistory.length === 1 && store.recoHistory[0].issue === target, '推荐存档写入成功（目标第' + target + '期，平码 ' + fl.length + ' 个 + 特码 ' + sp.length + ' 个）');
-  const judgedBefore = store.recoHistory[0].judged;
+  const pickRec = () => store.recoHistory.filter(h => h.issue === target)[0];
+  const rec = pickRec();
+  ok(!!rec && rec.flats.length === fl.length && rec.specials.length === sp.length,
+    '推荐存档写入成功（目标第' + target + '期，平码 ' + fl.length + ' 个 + 特码 ' + sp.length + ' 个，当前留档 ' + store.recoHistory.length + ' 期）');
+  const judgedBefore = rec ? rec.judged : -1;
   store.judgeRecoHistory();
-  ok(judgedBefore === 0 && store.recoHistory[0].judged === 0, '目标期未开奖 → 保持“待开奖”，不误判');
+  const rec2 = pickRec();
+  const drewTarget = store.draws.some(d => d.issue === target);
+  if (drewTarget) {
+    /* 测试执行期间后台同步恰好开出目标期（开奖时段跨零点常见）：此时回写判定才是正确行为 */
+    ok(!!rec2 && rec2.judged === 1,
+      '目标期 ' + target + ' 已被后台同步开出 → 正确回写为已判定（数据时点现象，judged=' + (rec2 && rec2.judged) + '）');
+  } else {
+    ok(judgedBefore === 0 && !!rec2 && rec2.judged === 0,
+      '目标期未开奖 → 保持“待开奖”，不误判（judged ' + judgedBefore + ' → ' + (rec2 && rec2.judged) + '）');
+  }
 
-  /* 7. 走势接口（POST + CORS 预检） */
-  return Promise.all([
-    fetch('https://trend.macaumarksix.com/countCode?time=' + Date.now(), {
+
+  /* 7. 走势接口（POST + CORS 预检）；Node 侧偶发 fetch failed，重试 2 次以排除网络抖动 */
+  const trendPost = (path) => {
+    const one = (left) => fetch('https://trend.macaumarksix.com/' + path + '?time=' + Date.now(), {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 2, count: 10 })
-    }).then(r => r.json()),
-    fetch('https://trend.macaumarksix.com/countTail?time=' + Date.now(), {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 2, count: 10 })
-    }).then(r => r.json()),
-    fetch('https://trend.macaumarksix.com/countZodiac?time=' + Date.now(), {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 2, count: 10 })
-    }).then(r => r.json()),
-    fetch('https://trend.macaumarksix.com/countWave?time=' + Date.now(), {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 2, count: 10 })
-    }).then(r => r.json())
-  ]).then(rs => {
+    }).then(r => r.json()).catch(e => {
+      if (left <= 0) throw e;
+      return new Promise(res => setTimeout(res, 800)).then(() => one(left - 1));
+    });
+    return one(2);
+  };
+  return Promise.all([trendPost('countCode'), trendPost('countTail'), trendPost('countZodiac'), trendPost('countWave')]).then(rs => {
     ok(rs[0].code === 200 && Object.keys(rs[0].data).length > 0, '走势 /countCode 返回 ' + Object.keys(rs[0].data).length + ' 个号码频次');
     ok(Object.keys(rs[1].data).length === 10, '走势 /countTail 返回 0-9 全部尾数');
     const zd = rs[2].data;
@@ -187,7 +216,7 @@ waitDraws(90000).then(async () => {
     /* 8. 各页面渲染无异常且含关键内容 */
     T.render();
     const sections = [
-      ['home', T.homeHtml, ['最新开奖', '本期推荐', '推荐历史', '冷门号预览', '平码生肖统计', '开奖记录']],
+      ['home', T.homeHtml, ['最新开奖', '本期推荐', '18码中特图', '平码留档', '冷门号预览', '平码生肖统计', '开奖记录']],
       ['cold', T.coldHtml, ['冷门号一览', '冷门 ' + T.COLD_T1, '极冷 ' + T.COLD_T2]],
       ['kill', T.killHtml, ['杀生肖分析', '平码生肖（不含特码）', '特码生肖', '本期杀生肖建议', '生肖遗漏']],
       ['pattern', T.patternHtml, ['冷号规律', '核心结论', '遗漏排行榜']],
