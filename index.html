@@ -22,6 +22,10 @@ button{font-family:inherit;cursor:pointer;border:0}
 .status{color:var(--sub);font-size:11px;margin-top:7px;padding-left:2px;line-height:1.45}
 .card{background:var(--card);border-radius:12px;padding:14px;margin-top:12px}
 .sec{font-size:15px;font-weight:700}
+/* 推荐历史：折叠头（标题 + 展开按钮，紧凑单行） */
+.histhead{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.sechint{font-size:11px;font-weight:400;color:var(--sub);margin-left:6px}
+.hbtn{flex:0 0 auto;border-radius:7px;padding:5px 11px;font-size:11px;color:#fff;line-height:1.2;white-space:nowrap;transition:background .15s}
 /* v2.7 爆冷保留：极冷=金 冷=琥珀 */
 .tip{color:var(--sub);font-size:11px;margin-top:3px;line-height:1.45}
 .ln{margin-top:3px;font-size:13px;line-height:1.5}
@@ -865,10 +869,21 @@ function numLine(label,nums,hits,judged,base){
   }
   return s+'</div>';
 }
+/* 推荐历史折叠状态：0=收起 1=展开（持久化，重绘后保持） */
+function histOpen(){return LS.get('xam_hist_open','0')==='1';}
+function toggleHist(){
+  var on=!histOpen();
+  LS.set('xam_hist_open',on?'1':'0');
+  var b=document.getElementById('histBody');
+  if(b)b.style.display=on?'':'none';
+  var btn=document.getElementById('histBtn');
+  if(btn){
+    btn.textContent=on?'收起 ▲':'展开 ▼';
+    btn.style.background=on?C.card2:C.acc;
+  }
+}
 function homeHistoryHtml(){
-  var s='<div class="card"><div class="sec">推荐历史（每期命中追踪）</div>';
   var hs=store.recoHistory;
-  if(!hs.length)return s+'<div class="ln" style="color:'+C.sub+';font-size:12px">暂无记录：推荐生成后自动存档，开奖后自动判定命中</div></div>';
   var judged=0,flatAll=0,flatHit=0,spAll=0,spHit=0;
   for(var i=0;i<hs.length;i++){
     var h=hs[i];if(h.judged===0)continue;
@@ -876,8 +891,15 @@ function homeHistoryHtml(){
     for(var k=0;k<h.flatHit.length;k++)if(h.flatHit[k]===1)flatHit++;
     if(h.specials.length){spAll++;if(h.specialHit===1)spHit++;}
   }
+  var open=histOpen();
+  var s='<div class="card"><div class="histhead">'+
+    '<div class="sec">推荐历史<span class="sechint">每期命中追踪</span></div>';
+  if(hs.length)s+='<button id="histBtn" class="hbtn" style="background:'+(open?C.card2:C.acc)+'" onclick="toggleHist()">'+(open?'收起 ▲':'展开 ▼')+'</button>';
+  s+='</div>';
+  if(!hs.length)return s+'<div class="ln" style="color:'+C.sub+';font-size:12px">暂无记录：推荐生成后自动存档，开奖后自动判定命中</div></div>';
   if(judged>0)s+='<div class="ln" style="color:'+C.acc+';font-size:12px">已追踪 '+judged+' 期 · 平码命中 '+flatHit+'/'+flatAll+' · 特码中 '+spHit+'/'+spAll+' 期</div>';
-  else s+='<div class="ln" style="color:'+C.sub+';font-size:11px">已存档 '+hs.length+' 期，等开奖后自动判定命中</div>';
+  else s+='<div class="ln" style="color:'+C.sub+';font-size:11px">已存档 '+hs.length+' 期 · 点「展开」看每期明细（开奖后自动判定命中）</div>';
+  s+='<div id="histBody" style="display:'+(open?'':'none')+'">';
   var show=Math.min(12,hs.length);
   for(var j=0;j<show;j++){
     var h2=hs[j],fh=0;
@@ -900,7 +922,7 @@ function homeHistoryHtml(){
     s+=numLine('特码 ',h2.specials,sh,h2.judged!==0,C.gold);
   }
   if(hs.length>12)s+='<div class="ln" style="color:'+C.sub+';font-size:10px">（共 '+hs.length+' 期存档，显示最近 12 期）</div>';
-  return s+'</div>';
+  return s+'</div></div>';
 }
 function homeColdHtml(){
   var s='<div class="card"><div class="sec">冷门号预览</div>'+
