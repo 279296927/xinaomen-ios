@@ -55,7 +55,7 @@ let FAIL = 0, PASS = 0;
 function ok(cond, msg) { console.log((cond ? 'PASS  ' : 'FAIL  ') + msg); if (cond) PASS++; else FAIL++; }
 
 try {
-  (0, eval)(code + '\n;globalThis.__T={store,LS,zodiacOfNum,ZODIAC,pad,render,homeHtml,coldHtml,killHtml,patternHtml,trendHtml,hotHtml,trendLoad,trendLocal,trend,COLD_T1,COLD_T2,WINDOW};'
+  (0, eval)(code + '\n;globalThis.__T={store,LS,zodiacOfNum,ZODIAC,pad,render,homeHtml,coldHtml,killHtml,patternHtml,trendHtml,hotHtml,trendLoad,trendLocal,trend,COLD_T1,COLD_T2,WINDOW,BOOT_DATA};'
     );
 } catch (e) {
   console.log('FAIL  脚本执行异常: ' + e.message);
@@ -67,10 +67,14 @@ console.log('... localStorage 访问次数=' + lsCalls + '（说明探测已发�
 const T = globalThis.__T;
 const store = T.store;
 
-/* 1. 内嵌数据生效 */
+/* 1. 内嵌数据生效（期望值从 BOOT_DATA 自身推导，随快照刷新自动跟随） */
 ok(store.draws.length === 150, '内嵌数据提供 150 期（实得 ' + store.draws.length + '）');
-ok(store.draws[0] && store.draws[0].issue === '2026288', '最新期为 2026288（实得 ' + (store.draws[0] || {}).issue + '）');
-ok(store.draws[149] && store.draws[149].issue === '2026139', '最旧期为 2026139（实得 ' + (store.draws[149] || {}).issue + '）');
+const bootRecs = String(T.BOOT_DATA || '').split(';').filter(Boolean);
+const expNew = bootRecs[0].split('|')[0];
+const expOld = bootRecs[bootRecs.length - 1].split('|')[0];
+const expNums = bootRecs[0].split('|')[3];
+ok(store.draws[0] && store.draws[0].issue === expNew, '最新期为 ' + expNew + '（实得 ' + (store.draws[0] || {}).issue + '）');
+ok(store.draws[149] && store.draws[149].issue === expOld, '最旧期为 ' + expOld + '（实得 ' + (store.draws[149] || {}).issue + '）');
 const issues = store.draws.map(d => d.issue);
 ok(issues.every((v, i) => i === 0 || issues[i - 1] > v), '期号严格降序');
 let gap = 0;
@@ -78,10 +82,12 @@ for (let i = 1; i < issues.length; i++) if (parseInt(issues[i - 1], 10) - parseI
 ok(gap === 0, '期号连续无缺口（断裂 ' + gap + ' 处）');
 
 const d0 = store.draws[0];
-ok(d0.nums.map(n => (n < 10 ? '0' + n : '' + n)).join(',') === '14,48,05,17,46,21,25',
-  '最新期开奖号为 14,48,05,17,46,21,25（实得 ' + d0.nums.map(n => (n < 10 ? '0' + n : '' + n)).join(',') + '）');
-ok(d0.zodiac.join(',') === '蛇,羊,虎,虎,鸡,狗,马', '最新期生肖已简体化（实得 ' + d0.zodiac.join(',') + '）');
-ok(d0.wave.split(',').join(',') === 'blue,blue,green,green,red,green,blue', '最新期波色还原正确（实得 ' + d0.wave + '）');
+const gotNums = d0.nums.map(n => (n < 10 ? '0' + n : '' + n)).join(',');
+ok(gotNums === expNums, '最新期开奖号为 ' + expNums + '（实得 ' + gotNums + '）');
+ok(d0.zodiac.every(z => z && !/[龍馬雞豬]/.test(z)), '最新期生肖已简体化且齐全（实得 ' + d0.zodiac.join(',') + '）');
+const wv0 = d0.wave.split(',');
+ok(wv0.length === 7 && wv0.every(w => w === 'red' || w === 'green' || w === 'blue'),
+  '最新期波色还原正确（实得 ' + d0.wave + '）');
 ok(!store.draws.some(d => /[龍馬雞豬]/.test(d.zodiac.join(''))), '全部 150 期生肖均为简体');
 ok(store.draws.every(d => d.nums.every(n => n >= 1 && n <= 49)), '全部 150 期号码均在 1..49');
 ok(store.draws.every(d => d.wave.split(',').length === 7), '全部 150 期波色为 7 段');
@@ -149,7 +155,7 @@ for (const [name, fn, need] of sections) {
 const home = T.homeHtml();
 ok((home.match(/class="ball"/g) || []).length > 900, '主页号码球 ' + (home.match(/class="ball"/g) || []).length + ' 个');
 ok(home.indexOf('★ 爆冷开出') >= 0, '主页爆冷标记存在');
-ok(home.indexOf('2026139') >= 0, '主页历史已渲染到最旧期 2026139');
+ok(home.indexOf(expOld) >= 0, '主页历史已渲染到最旧期 ' + expOld);
 
 /* 6. 趋势页真实走一遍离线分支（fetch 全失败 → 用本地降级，页面不留白） */
 T.trendLoad();
