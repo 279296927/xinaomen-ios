@@ -14,17 +14,15 @@ const all = recs.map(toDraw);
 const byIssue = {};
 all.forEach(d => { byIssue[d.issue] = d; });
 
-/* 故障态：297 + 288..140，共 150 期，缺 289~296 */
-let fault = [byIssue['2026297'] || all[0]];
-for (let i = 288; i >= 139 && fault.length < 150; i--) {
-  const k = '2026' + String(i).padStart(3, '0');
-  if (byIssue[k]) fault.push(byIssue[k]);
-}
-/* 快照只有到 148，补两个占位尾期凑满 150，完整复刻"满额但中间断裂" */
-let fill = 147;
-while (fault.length < 150) {
-  fault.push({ issue: '2026' + String(fill).padStart(3, '0'), time: '2026-10-14 21:32', wave: 'red,green,blue,red,green,blue,red', nums: [1, 2, 3, 4, 5, 6, 7], zodiac: ['鼠', '牛', '虎', '兔', '龙', '蛇', '马'] });
-  fill--;
+/* 从快照动态推导编号：最新期 = N，故障态 = N + (N-9)..(N-157)，中间缺 N-8..N-1 共 8 期 */
+const NEWEST = parseInt(recs[0].split('|')[0], 10);
+const GAP_FROM = NEWEST - 8;      /* 缺档起点（较早） */
+const GAP_TO = NEWEST - 1;        /* 缺档终点（较新） */
+const issueOf = n => String(n);
+const fault = [byIssue[issueOf(NEWEST)] || all[0]];
+for (let n = NEWEST - 9; fault.length < 150 && n > NEWEST - 400; n--) {
+  const d = byIssue[issueOf(n)];
+  if (d) fault.push(d);
 }
 const store0 = { xam_draws: JSON.stringify(fault) };
 let setCount = 0;
@@ -34,12 +32,12 @@ globalThis.localStorage = {
   removeItem: k => { delete store0[k]; }
 };
 
-/* 上游桩：真实格式，给 289~297 全量；时间用快照里 297 的真实开奖时间（避免误判过期） */
-const realTime = (byIssue['2026297'] || {}).time || '2026-10-24 21:32';
+/* 上游桩：真实格式，补回整段缺口（含最新期）；时间用快照真实开奖时间避免误判过期 */
+const realTime = (byIssue[issueOf(NEWEST)] || {}).time || '2026-10-26 21:32';
 const upstream = [];
-for (let i = 297; i >= 289; i--) {
+for (let n = NEWEST; n >= GAP_FROM; n--) {
   upstream.push({
-    expect: '2026' + String(i).padStart(3, '0'),
+    expect: issueOf(n),
     openTime: realTime + ':00',
     openCode: '01,02,03,04,05,06,07',
     zodiac: '龍,馬,雞,豬,鼠,牛,虎',
@@ -88,11 +86,14 @@ const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); c ? PASS++ : FA
   st.sortDesc(); st.trim();
 
   const before = st.draws.length;
-  const want = ['2026296', '2026295', '2026294', '2026293', '2026292', '2026291', '2026290', '2026289'];
+  /* 期望缺档：N-8 .. N-1 共 8 期 */
+  const want = [];
+  for (let n = GAP_FROM; n <= GAP_TO; n++) want.push(issueOf(n));
   const missingBefore = want.filter(i => !st.draws.some(d => d.issue === i));
   console.log('故障态 ' + before + ' 期，缺档 ' + missingBefore.length + ' 期: ' + missingBefore.join(','));
-  ok(before === 150, '故障态为满额 150 期（实得 ' + before + '）');
-  ok(missingBefore.length === 8, '故障态缺 289~296 共 8 期（实得 ' + missingBefore.length + '）');
+  /* 快照本身只跨 150 期，挖掉 8 期后剩 142 期；关键在于"有缺口时能否自愈" */
+  ok(before === 142, '故障态为快照剩余 142 期（实得 ' + before + '）');
+  ok(missingBefore.length === 8, '故障态缺 ' + GAP_FROM + '~' + GAP_TO + ' 共 8 期（实得 ' + missingBefore.length + '）');
   ok(st.needsBackfill() === true, 'needsBackfill 识别出缺口/过期');
 
   const wait = () => new Promise(r => setTimeout(r, 30));
@@ -104,8 +105,8 @@ const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); c ? PASS++ : FA
   const missingAfter = want.filter(i => !after.some(d => d.issue === i));
   console.log('同步后 ' + after.length + ' 期，最新 ' + after[0].issue + '，最旧 ' + after[after.length - 1].issue);
   console.log('缺档: ' + (missingAfter.join(',') || '无'));
-  ok(missingAfter.length === 0, '289~296 全部补齐（剩余缺口 ' + missingAfter.length + ' 期）');
-  ok(after.some(d => d.issue === '2026295' || d.issue === '2026294'), '293/294/295 这类中间期已就位');
+  ok(missingAfter.length === 0, GAP_FROM + '~' + GAP_TO + ' 全部补齐（剩余缺口 ' + missingAfter.length + ' 期）');
+  ok(after.some(d => d.issue === issueOf(GAP_TO - 2) || d.issue === issueOf(GAP_TO - 3)), '中间段号码已就位');
   ok(after.length === 150, '仍保持 150 期（trim 生效，实得 ' + after.length + '）');
   const iss = after.map(d => d.issue);
   let gap = 0;
